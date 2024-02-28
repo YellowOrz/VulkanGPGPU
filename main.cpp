@@ -43,7 +43,12 @@ void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT
 
 struct QueueFamilyIndices {
     optional<uint32_t> graphics_family;
+    optional<uint32_t> present_family;
     // TODO: 待添加其他的queue
+
+    bool IsComplete() {
+        return graphics_family.has_value() && present_family.has_value();
+    }
 };
 /* ------------------------------------------------------------------------------------------------------------------ */
 /*                                              HelloTriangleApplication                                              */
@@ -59,12 +64,16 @@ class HelloTriangleApplication {
 
   private:
     GLFWwindow *window_;
+
     VkInstance instance_;
     VkDebugUtilsMessengerEXT debug_messenger_;
     VkDebugUtilsMessengerCreateInfoEXT debug_create_info_;
+    VkSurfaceKHR surface_;
+
     VkPhysicalDevice physical_device_ = VK_NULL_HANDLE;
     VkDevice logical_device_;
-    VkQueue graphics_queue_;
+
+    VkQueue graphics_queue_, present_queue_;
 
     /** 初始化GLFW窗口 */
     void InitWindow() {
@@ -82,6 +91,7 @@ class HelloTriangleApplication {
         if (enable_debug_messenger &&
             CreateDebugUtilsMessengerEXT(instance_, &debug_create_info_, nullptr, &debug_messenger_) != VK_SUCCESS)
             throw std::runtime_error("failed to set up debug messenger!");
+        CreateSurface();            // NOTE: 要在CreateInstance之后，PickPhysicalDevice之前
         PickPhysicalDevice();
         CreateLogicalDevice();
     }
@@ -177,12 +187,24 @@ class HelloTriangleApplication {
         //! 查看是否有需要的
         for (int i = 0; i < queue_families.size(); i++) {
             auto &queue_family = queue_families[i];
-            if (queue_family.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            if (queue_family.queueFlags & VK_QUEUE_GRAPHICS_BIT) 
                 indices.graphics_family = i;
+                
+            
+            VkBool32 present_support = false;
+            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface_, &present_support);
+            if (present_support) 
+                indices.present_family = i;
+            
+            if(indices.IsComplete())
                 break;
-            }
         }
         return indices;
+    }
+    /** 创建surface */
+    void CreateSurface() {
+        if(glfwCreateWindowSurface(instance_, window_, nullptr, &surface_) != VK_SUCCESS)
+            throw runtime_error("failed to create window surface!");
     }
     /** 获取想要的物理GPU */
     void PickPhysicalDevice() {
@@ -195,7 +217,7 @@ class HelloTriangleApplication {
         vkEnumeratePhysicalDevices(instance_, &device_count, devices.data());
         //! 找到合适的gpu
         for (auto &device : devices) {
-            if (FindQueueFamilies(device).graphics_family.has_value()) {
+            if (FindQueueFamilies(device).IsComplete()) {
                 physical_device_ = device;
                 break;
             }
@@ -207,18 +229,22 @@ class HelloTriangleApplication {
     void CreateLogicalDevice() {
         QueueFamilyIndices indices = FindQueueFamilies(physical_device_);
         //! 创建logical device的queue信息
-        VkDeviceQueueCreateInfo queue_create_info{};
-        queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queue_create_info.queueFamilyIndex = indices.graphics_family.value();
-        queue_create_info.queueCount = 1;
+        vector<uint32_t> queue_families = {indices.graphics_family.value(), indices.present_family.value()};
+        vector<VkDeviceQueueCreateInfo> queue_create_infos(queue_families.size());
         float queue_priority = 1.0f;
-        queue_create_info.pQueuePriorities = &queue_priority;
+        for(int i = 0; i < queue_families.size(); i++) {
+            queue_create_infos[i].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queue_create_infos[i].queueFamilyIndex = queue_families[i];
+            queue_create_infos[i].queueCount = 1;
+            queue_create_infos[i].pQueuePriorities = &queue_priority;
+        }
+        
         //! 获取物理GPU的feature（暂时没用上）
         VkPhysicalDeviceFeatures device_features{};
         //! 创建logical device信息
         VkDeviceCreateInfo device_create_info{};
         device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        device_create_info.pQueueCreateInfos = &queue_create_info;
+        device_create_info.pQueueCreateInfos = queue_create_infos.data();
         device_create_info.queueCreateInfoCount = 1;
         device_create_info.pEnabledFeatures = &device_features;
         device_create_info.enabledExtensionCount = 0; // 不启用extension
@@ -232,6 +258,7 @@ class HelloTriangleApplication {
             throw std::runtime_error("failed to create logical device!");
         //! 获取logical device中queue的handle
         vkGetDeviceQueue(logical_device_, indices.graphics_family.value(), 0, &graphics_queue_);
+        vkGetDeviceQueue(logical_device_, indices.present_family.value(), 0, &present_queue_);
     }
     /* ---------------------------------------------------- MainLoop ----------------------------------------------- */
     void MainLoop() {
@@ -244,11 +271,12 @@ class HelloTriangleApplication {
         if (enable_debug_messenger)
             DestroyDebugUtilsMessengerEXT(instance_, debug_messenger_, nullptr);
 
+        vkDestroySurfaceKHR(instance_, surface_, nullptr);  // NOTE: 必须要在instance之前释放
         vkDestroyInstance(instance_, nullptr);
 
         glfwDestroyWindow(window_);
 
-        glfwTerminate();
+        glfwTerminate(); 
     }
 };
 
