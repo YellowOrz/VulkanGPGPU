@@ -18,7 +18,6 @@ class Context {
     /* --------------------------------------------------- init vulkan ---------------------------------------------- */
     void CreateInstance();
     void PickupPhysicalDevice();
-    void QueryQueueInfo();
     void CreateLogicalDevice();
 
     vk::Instance instance_;
@@ -44,4 +43,11 @@ class Context {
     vk::PipelineLayout pipeline_layout_ = nullptr;
     vk::Pipeline compute_pipeline_ = nullptr;
     // vk::ShaderModule compute_module_;
+
+    /* ----------------------------------------------------- buffer ------------------------------------------------- */
+    void CreateStorageBuffer(size_t size, vk::MemoryPropertyFlags mem_property);
+    size_t require_size;
+    vk::Buffer storage_buffer_ = nullptr;
+    vk::DeviceMemory storage_memory_ = nullptr;
+    void *memory_map_ = nullptr;
 };
