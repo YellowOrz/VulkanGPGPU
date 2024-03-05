@@ -11,7 +11,7 @@ struct QueueIndices {
 
 class Context {
   public:
-    Context(const std::string &spv_path);
+    Context(const std::string &spv_path, uint32_t size);
     ~Context();
 
   private:
@@ -27,18 +27,21 @@ class Context {
     vk::Queue compute_queue_;
     QueueIndices queue_indices_;
 
-    /* ----------------------------------------------------- shader ------------------------------------------------- */
-    void CreateShader(const std::string &spv_path);
-    vk::ShaderModule compute_module_;
-    vk::DescriptorSetLayout compute_descrip_layouts_;
+    /* ----------------------------------------------------- command ------------------------------------------------ */
+    void CreateCommandPoolAndBuffer();
+    vk::CommandPool cmd_pool_;
+    vk::CommandBuffer cmd_buffer_;
+
+    /* ------------------------------------------------- descriptor set --------------------------------------------- */
+    void CreateDescriptorSet(uint32_t size);
+    vk::DescriptorPool descriptor_pool_ = nullptr;
+    vk::DescriptorSetLayout descriptor_layout_;
+    vk::DescriptorSet descriptor_set_;
 
     /* ------------------------------------------------ compute pipeline -------------------------------------------- */
-    void CreateComputePipeline();
-    vk::PipelineCache pipeline_cache_ = nullptr;
+    void CreateComputePipeline(const std::string &spv_path);
+    // vk::PipelineCache pipeline_cache_ = nullptr;
     vk::PipelineLayout pipeline_layout_ = nullptr;
     vk::Pipeline compute_pipeline_ = nullptr;
-
-    /* -------------------------------------------------- command pool ---------------------------------------------- */
-    void CreateCommandPool();
-    vk::CommandPool pool_;
+    // vk::ShaderModule compute_module_;
 };
