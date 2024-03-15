@@ -4,9 +4,11 @@ using namespace std;
 
 
 int main() {
-    uint32_t buffer_num = 1;
-    string spv_path = "sum_two_vec.spv";
-    Context computer(spv_path, buffer_num);
+    uint32_t num = 1024;
+    string spv_path = "array_double.spv";
+    Context computer(spv_path, num);
+    computer.Run();
+    computer.PrintResult(20);
     return 0;
 }
 

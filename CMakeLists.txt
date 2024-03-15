@@ -9,8 +9,8 @@ include_directories(src ${Vulkan_INCLUDE_DIRS} ) # ${X11_Xxf86vm_INCLUDE_PATH} $
 set(ELT_COUNT 1024)
 set(WORKGROUP_SIZE 32)
 find_program(GLSLC_PROGRAM glslc REQUIRED)
-execute_process(COMMAND ${GLSLC_PROGRAM} ${CMAKE_SOURCE_DIR}/shader/sum_two_vec.comp 
-                         -o ${CMAKE_BINARY_DIR}/sum_two_vec.spv -DELT_COUNT=${ELT_COUNT} 
+execute_process(COMMAND ${GLSLC_PROGRAM} ${CMAKE_SOURCE_DIR}/shader/array_double.comp 
+                         -o ${CMAKE_BINARY_DIR}/array_double.spv -DELT_COUNT=${ELT_COUNT} 
                          -DWORKGROUP_SIZE=${WORKGROUP_SIZE})
 
 aux_source_directory(src SRC)

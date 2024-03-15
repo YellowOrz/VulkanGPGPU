@@ -13,7 +13,8 @@ class Context {
   public:
     Context(const std::string &spv_path, uint32_t size);
     ~Context();
-
+    void Run();
+    void PrintResult(int num);
   private:
     /* --------------------------------------------------- init vulkan ---------------------------------------------- */
     void CreateInstance();
@@ -33,6 +34,7 @@ class Context {
 
     /* ------------------------------------------------- descriptor set --------------------------------------------- */
     void CreateDescriptorSet(uint32_t size);
+    void UpdateDescriptorSetByBuffer();
     vk::DescriptorPool descriptor_pool_ = nullptr;
     vk::DescriptorSetLayout descriptor_layout_;
     vk::DescriptorSet descriptor_set_;
@@ -46,8 +48,10 @@ class Context {
 
     /* ----------------------------------------------------- buffer ------------------------------------------------- */
     void CreateStorageBuffer(size_t size, vk::MemoryPropertyFlags mem_property);
-    size_t require_size;
+    size_t num;
+    size_t bytes_num;
     vk::Buffer storage_buffer_ = nullptr;
     vk::DeviceMemory storage_memory_ = nullptr;
     void *memory_map_ = nullptr;
+
 };

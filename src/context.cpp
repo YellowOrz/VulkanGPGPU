@@ -11,14 +11,16 @@ Context::Context(const std::string &spv_path, uint32_t size) {
     CreateLogicalDevice();
     compute_queue_ = device_.getQueue(queue_indices_.compute_.value(), 0);
 
-    CreateDescriptorSet(size);
+    CreateDescriptorSet(1);
 
     CreateComputePipeline(spv_path);
 
     CreateCommandPoolAndBuffer();
 
-    CreateStorageBuffer(sizeof(unsigned int) * 1024, 
+    CreateStorageBuffer(sizeof(unsigned int) * size, 
                         vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+
+    UpdateDescriptorSetByBuffer();
 }
 
 Context::~Context() {
@@ -144,6 +146,16 @@ void Context::CreateDescriptorSet(uint32_t size) {
     descriptor_set_ = sets[0];
 }
 
+void Context::UpdateDescriptorSetByBuffer() {
+    vk::DescriptorBufferInfo buffer_info;
+    buffer_info.setBuffer(storage_buffer_).setOffset(0).setRange(bytes_num);
+
+    vk::WriteDescriptorSet writer;
+    writer.setDescriptorCount(1).setDescriptorType(vk::DescriptorType::eStorageBuffer).setDstBinding(0).setDstSet(descriptor_set_).setBufferInfo(buffer_info);
+
+    device_.updateDescriptorSets(writer, {});
+}
+
 /* ------------------------------------------------------------------------------------------------------------------ */
 /*                                                  compute pipeline                                                  */
 /* ------------------------------------------------------------------------------------------------------------------ */
@@ -179,6 +191,9 @@ void Context::CreateComputePipeline(const std::string &spv_path) {
     device_.destroyShaderModule(compute_module);
 }
 
+/* ------------------------------------------------------------------------------------------------------------------ */
+/*                                                       buffer                                                       */
+/* ------------------------------------------------------------------------------------------------------------------ */
 void Context::CreateStorageBuffer(size_t size, vk::MemoryPropertyFlags mem_property) {
     //! buffer
     vk::BufferCreateInfo buffer_info;
@@ -192,7 +207,7 @@ void Context::CreateStorageBuffer(size_t size, vk::MemoryPropertyFlags mem_prope
 
     //! memory
     auto requirements = device_.getBufferMemoryRequirements(storage_buffer_);
-    require_size = requirements.size;
+    bytes_num = requirements.size;
     uint32_t index = 0;
     auto phy_memory_property = phy_device_.getMemoryProperties();
     for (uint32_t i = 0; i < phy_memory_property.memoryTypeCount; i++) {
@@ -203,13 +218,41 @@ void Context::CreateStorageBuffer(size_t size, vk::MemoryPropertyFlags mem_prope
     }
 
     vk::MemoryAllocateInfo alloc_info;
-    alloc_info.setAllocationSize(require_size).setMemoryTypeIndex(index);
+    alloc_info.setAllocationSize(bytes_num).setMemoryTypeIndex(index);
     storage_memory_ = device_.allocateMemory(alloc_info);
 
     device_.bindBufferMemory(storage_buffer_, storage_memory_, 0);
 
     if (mem_property & vk::MemoryPropertyFlagBits::eHostVisible)
-        memory_map_ = device_.mapMemory(storage_memory_, 0, require_size);
+        memory_map_ = device_.mapMemory(storage_memory_, 0, bytes_num);
     else
         memory_map_ = nullptr;
+}
+
+void Context::Run() {
+    vk::CommandBufferBeginInfo begin_info;
+    begin_info.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+
+    cmd_buffer_.begin(begin_info);
+    cmd_buffer_.bindPipeline(vk::PipelineBindPoint::eCompute, compute_pipeline_);
+    cmd_buffer_.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipeline_layout_, 0, {descriptor_set_}, {});
+    cmd_buffer_.dispatch(1, 1, 1);
+    cmd_buffer_.end();
+        
+    vk::SubmitInfo submit_info;
+    submit_info.setCommandBuffers(cmd_buffer_);
+    compute_queue_.submit(submit_info);
+    
+    device_.waitIdle();
+}
+
+void Context::PrintResult(int num) {
+    unsigned int *data;
+    data = (unsigned int *)malloc(bytes_num);
+    memcpy(data, memory_map_, bytes_num);
+
+    for(int i = 0; i < num; i++)
+        printf("%u\n", data[i]);
+    
+    delete data;
 }
