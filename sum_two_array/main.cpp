@@ -58,6 +58,8 @@ int main() {
   vk::Buffer buffer_in1 = device.createBuffer(buffer_create_info);
   vk::Buffer buffer_in2 = device.createBuffer(buffer_create_info);
   vk::Buffer buffer_out = device.createBuffer(buffer_create_info);
+  buffer_create_info.setSize(sizeof(int));
+  vk::Buffer buffer_count = device.createBuffer(buffer_create_info);
   //! 找到合适内存类型
   vk::PhysicalDeviceMemoryProperties phy_mem_req = physical_device.getMemoryProperties();
   int mem_type_idx = -1;
@@ -79,15 +81,14 @@ int main() {
     cout << "[INFO] Memory heap size: " << mem_heap_size << endl;
   }
   //! 分配内存
-  vk::MemoryRequirements mem_in1_req = device.getBufferMemoryRequirements(buffer_in1);
-  vk::MemoryRequirements mem_in2_req = device.getBufferMemoryRequirements(buffer_in2);
-  vk::MemoryRequirements mem_out_req = device.getBufferMemoryRequirements(buffer_out);
-  vk::MemoryAllocateInfo mem_in1_alloc_info(mem_in1_req.size, mem_type_idx);
-  vk::MemoryAllocateInfo mem_in2_alloc_info(mem_in2_req.size, mem_type_idx);
-  vk::MemoryAllocateInfo mem_out_alloc_info(mem_out_req.size, mem_type_idx);
-  vk::DeviceMemory mem_in1 = device.allocateMemory(mem_in1_alloc_info);
-  vk::DeviceMemory mem_in2 = device.allocateMemory(mem_in2_alloc_info);
-  vk::DeviceMemory mem_out = device.allocateMemory(mem_out_alloc_info);
+  vk::MemoryRequirements mem_array_req = device.getBufferMemoryRequirements(buffer_in1);  // 三个数组的req一样的
+  vk::MemoryAllocateInfo mem_array_alloc_info(mem_array_req.size, mem_type_idx);
+  vk::MemoryRequirements mem_count_req = device.getBufferMemoryRequirements(buffer_count);
+  vk::MemoryAllocateInfo mem_count_alloc_info(mem_count_req.size, mem_type_idx);
+  vk::DeviceMemory mem_in1 = device.allocateMemory(mem_array_alloc_info);
+  vk::DeviceMemory mem_in2 = device.allocateMemory(mem_array_alloc_info);
+  vk::DeviceMemory mem_out = device.allocateMemory(mem_array_alloc_info);
+  vk::DeviceMemory mem_count = device.allocateMemory(mem_count_alloc_info);
   //! 初始化内存
   float *array1 = (float *)malloc(byte_size);
   float *array2 = (float *)malloc(byte_size);
@@ -95,15 +96,19 @@ int main() {
     array1[i] = i;
     array2[i] = i * 2;
   }
-  void *mem_in1_ptr = device.mapMemory(mem_in1, 0, mem_in1_req.size);
+  void *mem_in1_ptr = device.mapMemory(mem_in1, 0, mem_array_req.size);
   memcpy(mem_in1_ptr, array1, byte_size);
   device.unmapMemory(mem_in1);
-  void *mem_in2_ptr = device.mapMemory(mem_in2, 0, mem_in2_req.size);
+  void *mem_in2_ptr = device.mapMemory(mem_in2, 0, mem_array_req.size);
   memcpy(mem_in2_ptr, array2, byte_size);
   device.unmapMemory(mem_in2);
+  void *mem_count_ptr = device.mapMemory(mem_count, 0, mem_count_req.size);
+  memcpy(mem_count_ptr, &element_num, sizeof(int));
+  device.unmapMemory(mem_count);
   device.bindBufferMemory(buffer_in1, mem_in1, 0);
   device.bindBufferMemory(buffer_in2, mem_in2, 0);
   device.bindBufferMemory(buffer_out, mem_out, 0);
+  device.bindBufferMemory(buffer_count, mem_count, 0);
   //! 创建shader module
   string spv_filename = "sum_two_array.spv";
   ifstream file(spv_filename, ios::binary | ios::ate);
@@ -122,7 +127,8 @@ int main() {
   vector<vk::DescriptorSetLayoutBinding> des_set_layout_bindings = {
     {0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute},
     {1, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute},
-    {2, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute} // TODO: 数组长度，uniform变量
+    {2, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute},
+    {3, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute}
   };
   vk::DescriptorSetLayoutCreateInfo des_set_layout_create_info;
   des_set_layout_create_info.setBindings(des_set_layout_bindings);
@@ -146,9 +152,9 @@ int main() {
   vk::Pipeline pipeline = result.value;
   //! 创建descriptor pool
   vk::DescriptorPoolSize des_pool_size;
-  des_pool_size.setType(vk::DescriptorType::eStorageBuffer).setDescriptorCount(3);
+  des_pool_size.setType(vk::DescriptorType::eStorageBuffer).setDescriptorCount(4);
   vk::DescriptorPoolCreateInfo des_pool_create_info;
-  des_pool_create_info.setMaxSets(3).setPoolSizes(des_pool_size);
+  des_pool_create_info.setMaxSets(4).setPoolSizes(des_pool_size);
   vk::DescriptorPool des_pool = device.createDescriptorPool(des_pool_create_info);
   //! 创建descriptor set
   vk::DescriptorSetAllocateInfo des_set_alloc_info;
@@ -156,14 +162,16 @@ int main() {
   const vector<vk::DescriptorSet> des_set_array = device.allocateDescriptorSets(des_set_alloc_info);
   vk::DescriptorSet des_set = des_set_array.front();
   //! 写descriptor set
-  vk::DescriptorBufferInfo des_buff_in1, des_buff_in2, des_buff_out;
+  vk::DescriptorBufferInfo des_buff_in1, des_buff_in2, des_buff_out, des_buff_count;
   des_buff_in1.setBuffer(buffer_in1).setOffset(0).setRange(byte_size);
   des_buff_in2.setBuffer(buffer_in2).setOffset(0).setRange(byte_size);
   des_buff_out.setBuffer(buffer_out).setOffset(0).setRange(byte_size);
+  des_buff_count.setBuffer(buffer_count).setOffset(0).setRange(sizeof(int));
   const std::vector<vk::WriteDescriptorSet> des_write_array = {
     {des_set, 0, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &des_buff_in1},
     {des_set, 1, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &des_buff_in2},
     {des_set, 2, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &des_buff_out},
+    {des_set, 3, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &des_buff_count},
   };
   device.updateDescriptorSets(des_write_array, {});
   //! 创建command pool
@@ -217,9 +225,11 @@ int main() {
   device.freeMemory(mem_in1);
   device.freeMemory(mem_in2);
   device.freeMemory(mem_out);
+  device.freeMemory(mem_count);
   device.destroyBuffer(buffer_in1);
   device.destroyBuffer(buffer_in2);
   device.destroyBuffer(buffer_out);
+  device.destroyBuffer(buffer_count);
   device.destroy();
   instance.destroy();
 
