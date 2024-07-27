@@ -1,0 +1,24 @@
+#version 450
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in; // 设置block size
+layout(binding = 0) buffer Array {float array[];};
+layout(binding = 1) buffer Sum {float sum;};
+layout(binding = 2) buffer Count {uint count;}; // TODO: 改成uniform
+
+shared float sums[256]; // 必须=local_size_x
+
+void main () {
+  uint tid = gl_LocalInvocationIndex;
+  uint id = gl_GlobalInvocationID.x;
+  // 先把global的数据加到shared
+  float sum_tmp = 0;
+  for(uint i = tid; i < count; i += gl_WorkGroupSize.x) 
+    sum_tmp += array[i];
+  sums[tid] = sum_tmp;
+  barrier();
+  // 对shared的数据进行规约
+  for(uint stride = gl_WorkGroupSize.x/2; stride > 0; stride /= 2) {
+    if(tid < stride) sums[tid] += sums[tid + stride];
+    barrier();
+  }
+  if(tid == 0) sum = sums[0];
+}
