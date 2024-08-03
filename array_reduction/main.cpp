@@ -13,11 +13,7 @@ int main() {
   app_info.setApiVersion(VK_API_VERSION_1_1);
 
   const vector<const char *> layer_names = {"VK_LAYER_KHRONOS_validation"};
-  vk::InstanceCreateInfo instance_info;
-  instance_info.setPApplicationInfo(&app_info)
-      .setPEnabledLayerNames(layer_names)
-      .setEnabledExtensionCount(0);
-
+  vk::InstanceCreateInfo instance_info({}, &app_info, layer_names, {});
   vk::Instance instance = vk::createInstance(instance_info);
   //! 准备physical device
   vk::PhysicalDevice physical_device = instance.enumeratePhysicalDevices().front();
@@ -44,12 +40,12 @@ int main() {
   vk::DeviceQueueCreateInfo queue_create_info;
   float priority = 1;
   queue_create_info.setQueueFamilyIndex(uint32_t(compute_queue_idx)).setQueueCount(1).setQueuePriorities(priority);
-  vk::DeviceCreateInfo device_create_info;
-  device_create_info.setQueueCreateInfos(queue_create_info);
+  const vector<const char *> extension_names = {"VK_KHR_shader_non_semantic_info"};
+  vk::DeviceCreateInfo device_create_info({}, queue_create_info, /*pEnabledLayerNames*/{}, extension_names);
   vk::Device device = physical_device.createDevice(device_create_info);
   //! 准备buffer
-  const uint element_num = 1<<19;
-  const int byte_size = element_num * sizeof(float);
+  const uint element_num = 1<<12;
+  const uint byte_size = element_num * sizeof(float);
   vector<uint32_t> queue_indices = {uint32_t(compute_queue_idx)};
   vk::BufferCreateInfo buffer_create_info;
   buffer_create_info.setSize(byte_size)
@@ -60,6 +56,7 @@ int main() {
   buffer_create_info.setSize(sizeof(float));
   vk::Buffer buffer_sum = device.createBuffer(buffer_create_info);
   buffer_create_info.setSize(sizeof(uint));
+  buffer_create_info.setUsage(vk::BufferUsageFlagBits::eUniformBuffer);
   vk::Buffer buffer_count = device.createBuffer(buffer_create_info);
   //! 找到合适内存类型
   vk::PhysicalDeviceMemoryProperties phy_mem_req = physical_device.getMemoryProperties();
@@ -95,7 +92,7 @@ int main() {
   float *array = (float *)malloc(byte_size);
   float sum = 0;
   for (int i = 0; i < element_num; i++){
-    array[i] = 1;
+    array[i] = i * 0.01;
     sum += array[i];
   }
   void *mem_array_ptr = device.mapMemory(mem_array, 0, mem_array_req.size);
@@ -123,9 +120,9 @@ int main() {
   vk::ShaderModule shader_module = device.createShaderModule(shader_module_create_info);
   //! 创建descriptor set layout
   vector<vk::DescriptorSetLayoutBinding> des_set_layout_bindings = {
-    {0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute},
-    {1, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute},
-    {2, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute},
+    {/*binding*/0, vk::DescriptorType::eStorageBuffer, /*descriptorCount*/1, vk::ShaderStageFlagBits::eCompute},  // 对应array
+    {1, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute},  // 对应sum
+    {2, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eCompute},  // 对应count
   };
   vk::DescriptorSetLayoutCreateInfo des_set_layout_create_info;
   des_set_layout_create_info.setBindings(des_set_layout_bindings);
@@ -148,10 +145,13 @@ int main() {
   }
   vk::Pipeline pipeline = result.value;
   //! 创建descriptor pool
-  vk::DescriptorPoolSize des_pool_size;
-  des_pool_size.setType(vk::DescriptorType::eStorageBuffer).setDescriptorCount(3);
-  vk::DescriptorPoolCreateInfo des_pool_create_info;
-  des_pool_create_info.setMaxSets(3).setPoolSizes(des_pool_size);
+  vector<vk::DescriptorPoolSize> des_pool_sizes = { // NOTE: 用到的每种类型描述符都要设置数量
+    {vk::DescriptorType::eStorageBuffer, /*descriptorCount*/100},   // 其实就用到2个
+    {vk::DescriptorType::eUniformBuffer, 100},                      // 其实就用到1个
+  };        // NOTE: DescriptorPoolSize的descriptorCount表示可以分配的descriptor的最大数量
+  vk::DescriptorPoolCreateInfo des_pool_create_info(
+    vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, /*maxSets*/1, des_pool_sizes
+  );        // NOTE: DescriptorPoolCreateInfo的maxSets表示可以分配的descriptor set的最大数量
   vk::DescriptorPool des_pool = device.createDescriptorPool(des_pool_create_info);
   //! 创建descriptor set
   vk::DescriptorSetAllocateInfo des_set_alloc_info;
@@ -164,9 +164,10 @@ int main() {
   des_buff_sum.setBuffer(buffer_sum).setOffset(0).setRange(sizeof(float));
   des_buff_count.setBuffer(buffer_count).setOffset(0).setRange(sizeof(uint));
   const std::vector<vk::WriteDescriptorSet> des_write_array = {
-    {des_set, 0, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &des_buff_array},
+    {des_set, 0, /*dstArrayElement*/0, /*descriptorCount*/1, vk::DescriptorType::eStorageBuffer, /*pImageInfo*/nullptr, 
+      &des_buff_array},
     {des_set, 1, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &des_buff_sum},
-    {des_set, 2, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &des_buff_count},
+    {des_set, 2, 0, 1, vk::DescriptorType::eUniformBuffer, nullptr, &des_buff_count},
   };
   device.updateDescriptorSets(des_write_array, {});
   //! 创建command pool
@@ -184,7 +185,7 @@ int main() {
   cmd_buff.begin(cmd_begin_info);
   cmd_buff.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
   cmd_buff.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipe_layout, 0, {des_set}, {});
-  cmd_buff.dispatch(256, 1, 1);   // 设置grid size  // NOTE: GLSL中设置的是block size
+  cmd_buff.dispatch(1, 1, 1);   // 设置grid size  // NOTE: GLSL中设置的是block size
   cmd_buff.end();
   //! 提交cmd
   vk::SubmitInfo submit_info;
