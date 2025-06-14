@@ -1,0 +1,30 @@
+#version 460
+#extension GL_EXT_shader_atomic_float : require
+#extension GL_EXT_debug_printf: require // 用于调试时打印信息
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in; // 设置block size
+layout(binding = 0) buffer Array {int array[];};
+layout(binding = 1) buffer Sum {int sum;};
+layout(binding = 2) uniform Count {uint count;};
+
+shared int sums[32]; // 必须=local_size_x
+
+void main () {
+  uint tid = gl_LocalInvocationID.x;;
+  uint id = gl_GlobalInvocationID.x;
+  // 先把global的数据加到shared
+  int sum_tmp = 0;
+  uint stride = gl_WorkGroupSize.x * gl_NumWorkGroups.x;
+  for(uint i = id; i < count; i += stride)
+    sum_tmp += array[i];
+  sums[tid] = sum_tmp;
+  barrier();
+  // 对shared的数据进行规约
+  for(stride = gl_WorkGroupSize.x/2; stride > 0; stride /= 2) {
+    if(tid < stride) sums[tid] += sums[tid + stride];
+    barrier();
+  }
+  if(tid == 0) {
+    debugPrintfEXT("tid %u id %u Sum: %f\n", tid, id, sums[0]);
+    atomicAdd(sum, sums[0]);
+  }
+}
