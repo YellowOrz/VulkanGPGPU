@@ -1,7 +1,92 @@
 #include "benchmark.h"
 #include <iostream>
 
+# define VK_CHECK(call) \
+{ \
+  auto res = vk::Result(call); \
+  if (vk::Result::eSuccess != res) { \
+    printf("[Error] vulkan call failed in %s:%d, result is %s\n",__FILE__,__LINE__, vk::to_string(res)); \
+    return false; \
+  } \
+} \
+
 using namespace std;
+
+bool Buffer::init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUsageFlags buff_usage,
+    VmaMemoryUsage alloc_usage) {
+  one_elem_size = elem_size;
+  num_elems = num;
+  size = one_elem_size * num_elems;
+  allocator = info.allocator;
+
+  VkBufferCreateInfo buffer_info;
+  buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  buffer_info.size = size;
+  buffer_info.usage = static_cast<VkBufferUsageFlags>(buff_usage);
+  buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  buffer_info.pQueueFamilyIndices = &info.queue_idx;
+
+  VmaAllocationCreateInfo alloc_info;
+  alloc_info.usage = alloc_usage;
+  // alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+  // alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+  // alloc_info.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+  VkBuffer buff_tmp = buffer;
+  VK_CHECK(vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &buff_tmp, &allocation, nullptr));
+  return true;
+}
+
+Buffer::~Buffer() {
+  vmaDestroyBuffer(allocator, buffer, allocation);
+}
+
+vk::DescriptorType ConvertVkBufferUsage2DescriptorType(vk::BufferUsageFlags usage) {
+  switch (usage) {
+  case vk::BufferUsageFlagBits::eStorageBuffer:
+    return vk::DescriptorType::eStorageBuffer;
+  case vk::BufferUsageFlagBits::eUniformBuffer:
+    return vk::DescriptorType::eUniformBuffer;
+  default:
+    return vk::DescriptorType::eSampler;  // TODO: 应该填啥？
+  }
+}
+
+bool DescriptorSet::init(const VkInfo &info, const std::vector<Buffer*> &buffers) {
+  device = info.device;
+  //! 创建descriptor set layout
+  auto num = buffers.size();
+  vector<vk::DescriptorSetLayoutBinding> bindings(num);
+  for (uint32_t i = 0; i<num;i++)
+    bindings[i] = {i, ConvertVkBufferUsage2DescriptorType(buffers[i]->usage), 1, vk::ShaderStageFlagBits::eCompute};
+
+  vk::DescriptorSetLayoutCreateInfo layout_info;
+  layout_info.setBindings(bindings);
+  VK_CHECK(device.createDescriptorSetLayout(&layout_info, nullptr, &layout));
+
+  //! 创建descriptor set
+  vk::DescriptorSetAllocateInfo set_info;
+  set_info.setDescriptorPool(info.desc_pool);
+  set_info.setPSetLayouts(&layout);
+  set_info.setDescriptorSetCount(1);
+  VK_CHECK(device.allocateDescriptorSets(&set_info, &set));
+  //! 写descriptor set
+  vector<vk::DescriptorBufferInfo> buffer_info(num);
+  vector<vk::WriteDescriptorSet> write_set(num);
+  for (uint32_t i = 0; i<num; i++) {
+    auto buffer = buffers[i];
+    buffer_info[i].setBuffer(buffer->buffer);
+    buffer_info[i].setOffset(0);
+    buffer_info[i].setRange(buffer->size);
+
+    write_set[i] = {set, i, 0, 1, ConvertVkBufferUsage2DescriptorType(buffer->usage), nullptr, &buffer_info[i]};
+  }
+  device.updateDescriptorSets(write_set, nullptr);  // TODO: 需要descriptor copy嘛？
+  return true;
+}
+DescriptorSet::~DescriptorSet() {
+  device.destroyDescriptorSetLayout(layout);
+}
 
 Benchmark::Benchmark() {
     // 初始化
@@ -13,15 +98,16 @@ void Benchmark::run() {
 }
 bool Benchmark::init_vk_info() {
   auto &instance = vk_info_.instance;
+  auto api_version = VK_API_VERSION_1_3;
   {//! 初始化instance
     vk::ApplicationInfo app_info;
     app_info.setPApplicationName("VulkanBenchmark");
-    app_info.setApiVersion(VK_API_VERSION_1_3);
+    app_info.setApiVersion(api_version);
     app_info.setApplicationVersion(1);
 
     const vector<const char *> layer_names = {"VK_LAYER_KHRONOS_validation"};
     vk::InstanceCreateInfo create_info({}, &app_info, layer_names, {});
-    instance = vk::createInstance(create_info);
+    VK_CHECK(vk::createInstance(&create_info, nullptr, &instance));
   }
 
   auto &phy_device = vk_info_.phy_device;
@@ -68,12 +154,11 @@ bool Benchmark::init_vk_info() {
     vk::DeviceQueueCreateInfo queue_info({}, queue_idx, 1, &priority);
     const vector<const char *> extension_names = {"VK_EXT_shader_atomic_float", "VK_KHR_shader_non_semantic_info"};
     vk::DeviceCreateInfo create_info({}, 1, &queue_info, 0, nullptr, 0, nullptr);
-    device = phy_device.createDevice(create_info);
+    VK_CHECK(phy_device.createDevice(&create_info, nullptr, &device));
   }
-
   { //! 初始化command pool
     vk::CommandPoolCreateInfo create_info({}, queue_idx);
-    vk_info_.cmd_pool = device.createCommandPool(create_info);
+    VK_CHECK(device.createCommandPool(&create_info, nullptr, &vk_info_.cmd_pool));
   }
   { //! 初始化descriptor pool
     vector<vk::DescriptorPoolSize> pool_sizes = {
@@ -84,7 +169,16 @@ bool Benchmark::init_vk_info() {
     create_info.setMaxSets(10);             // 可以分配的descriptor set的最大数量
     create_info.setPoolSizes(pool_sizes);
     create_info.setFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet);
-    vk_info_.desc_pool = device.createDescriptorPool(create_info);
+    VK_CHECK(device.createDescriptorPool(&create_info, nullptr, &vk_info_.desc_pool));
+  }
+
+  { //! 初始化VmaAllocator
+    VmaAllocatorCreateInfo create_info = {};
+    create_info.vulkanApiVersion = api_version;
+    create_info.physicalDevice = phy_device;
+    create_info.device = device;
+    create_info.instance = instance;
+    VK_CHECK(vmaCreateAllocator(&create_info, &vk_info_.allocator));
   }
   return true;
 }
