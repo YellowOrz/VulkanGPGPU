@@ -38,9 +38,12 @@ struct DescriptorSet {
 };
 
 struct Pipeline {
-  bool init(const VkInfo &info);
+  bool init(const VkInfo &info, const vk::DescriptorSetLayout &desc_layout, const std::vector<uint32_t> &shader_code);
   vk::Pipeline pipeline;
   vk::PipelineLayout layout;
+  vk::PipelineCache cache;  // TODO: 有必要吗
+  vk::ShaderModule shader_module;
+  vk::Device device;
 };
 
 class Benchmark {

@@ -88,6 +88,34 @@ DescriptorSet::~DescriptorSet() {
   device.destroyDescriptorSetLayout(layout);
 }
 
+bool Pipeline::init(const VkInfo &info, const vk::DescriptorSetLayout &desc_layout, const vector<uint32_t> &shader_code) {
+  device = info.device;
+  vk::PipelineLayoutCreateInfo layout_info;
+  layout_info.setSetLayouts({desc_layout});
+  VK_CHECK(device.createPipelineLayout(&layout_info, nullptr, &layout));
+
+  vk::ShaderModuleCreateInfo shader_info;
+  shader_info.setCode(shader_code); // 等价于下面两行
+  // shader_info.setCodeSize(shader_code.size() * sizeof(uint32_t));
+  // shader_info.setPCode(shader_code.data());
+  VK_CHECK(device.createShaderModule(&shader_info, nullptr, &shader_module));
+
+  vk::PipelineCacheCreateInfo cache_info; // TODO: 完善
+  VK_CHECK(device.createPipelineCache(&cache_info, nullptr, &cache));
+
+  vk::PipelineShaderStageCreateInfo stage_info;
+  stage_info.setStage(vk::ShaderStageFlagBits::eCompute);
+  stage_info.setModule(shader_module);
+  stage_info.setPName("main");
+
+  vk::ComputePipelineCreateInfo pipeline_info;
+  pipeline_info.setLayout(layout);
+  pipeline_info.setStage(stage_info);
+  VK_CHECK(device.createComputePipelines(cache, 1, &pipeline_info, nullptr, &pipeline));
+
+  return true;
+}
+
 Benchmark::Benchmark() {
     // 初始化
 }
