@@ -38,7 +38,7 @@ struct DescriptorSet {
 };
 
 struct Pipeline {
-  bool init(const VkInfo &info, const vk::DescriptorSetLayout &desc_layout, const std::vector<uint32_t> &shader_code);
+  bool init(const VkInfo &info, const DescriptorSet &desc, const std::vector<uint32_t> &shader_code);
   vk::Pipeline pipeline;
   vk::PipelineLayout layout;
   vk::PipelineCache cache;  // TODO: 有必要吗
@@ -48,21 +48,25 @@ struct Pipeline {
 
 class Benchmark {
 public:
-  Benchmark();
+  Benchmark(int elem_num);
   ~Benchmark();
 
+  bool CreateSuccrss() const {return create_succrss_;};
   void run();
 
 private:
-  bool init_vk_info();
-  bool init_buffers();
-  bool init_descriptors();
-  bool init_pipelines();
+  bool InitVkInfo();
+  bool CreateBuffers(int elem_num);
+  bool CreateDescriptors();
+  bool CreatePipelines();
 
   VkInfo vk_info_;
   std::unordered_map<std::string, Buffer> buffers_;
   std::unordered_map<std::string, DescriptorSet> desc_sets_;
   std::unordered_map<std::string, Pipeline> pipelines_;
+
+  int elem_num_;
+  bool create_succrss_;
 };
 
 

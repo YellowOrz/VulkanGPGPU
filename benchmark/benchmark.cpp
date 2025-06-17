@@ -1,5 +1,6 @@
 #include "benchmark.h"
 #include <iostream>
+#include "shaders.hpp"
 
 # define VK_CHECK(call) \
 { \
@@ -42,14 +43,11 @@ Buffer::~Buffer() {
 }
 
 vk::DescriptorType ConvertVkBufferUsage2DescriptorType(vk::BufferUsageFlags usage) {
-  switch (usage) {
-  case vk::BufferUsageFlagBits::eStorageBuffer:
+  if (usage & vk::BufferUsageFlagBits::eStorageBuffer)
     return vk::DescriptorType::eStorageBuffer;
-  case vk::BufferUsageFlagBits::eUniformBuffer:
+  if (usage & vk::BufferUsageFlagBits::eUniformBuffer)
     return vk::DescriptorType::eUniformBuffer;
-  default:
-    return vk::DescriptorType::eSampler;  // TODO: 应该填啥？
-  }
+  return vk::DescriptorType::eSampler;  // 默认值
 }
 
 bool DescriptorSet::init(const VkInfo &info, const std::vector<Buffer*> &buffers) {
@@ -88,10 +86,10 @@ DescriptorSet::~DescriptorSet() {
   device.destroyDescriptorSetLayout(layout);
 }
 
-bool Pipeline::init(const VkInfo &info, const vk::DescriptorSetLayout &desc_layout, const vector<uint32_t> &shader_code) {
+bool Pipeline::init(const VkInfo &info, const DescriptorSet &desc, const vector<uint32_t> &shader_code) {
   device = info.device;
   vk::PipelineLayoutCreateInfo layout_info;
-  layout_info.setSetLayouts({desc_layout});
+  layout_info.setSetLayouts({desc.layout});
   VK_CHECK(device.createPipelineLayout(&layout_info, nullptr, &layout));
 
   vk::ShaderModuleCreateInfo shader_info;
@@ -116,15 +114,32 @@ bool Pipeline::init(const VkInfo &info, const vk::DescriptorSetLayout &desc_layo
   return true;
 }
 
-Benchmark::Benchmark() {
-    // 初始化
+Benchmark::Benchmark(int elem_num) {
+  create_succrss_ = false;
+  if (!InitVkInfo()) {
+    printf("[FATAL] Failed to initialize Vulkan instance.\n");
+    return;
+  }
+  if (CreateBuffers(elem_num)) {
+    printf("[FATAL] Failed to create buffers.\n");
+    return;
+  }
+  if (CreateDescriptors()) {
+    printf("[FATAL] Failed to create descriptors.\n");
+    return;
+  }
+  if (CreatePipelines()) {
+    printf("[FATAL] Failed to create pipelines.\n");
+    return;
+  }
+  create_succrss_ = true;
 }
 Benchmark::~Benchmark() {
     // 清理
 }
 void Benchmark::run() {
 }
-bool Benchmark::init_vk_info() {
+bool Benchmark::InitVkInfo() {
   auto &instance = vk_info_.instance;
   auto api_version = VK_API_VERSION_1_3;
   {//! 初始化instance
@@ -211,7 +226,34 @@ bool Benchmark::init_vk_info() {
   return true;
 }
 
-bool Benchmark::init_descriptors() {
+bool Benchmark::CreateBuffers(int elem_num) {
+  elem_num_ = elem_num;
+  bool create_success = true;
+  create_success &= buffers_["array1"].init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
+      VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
+  create_success &= buffers_["array2"].init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
+      VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
+  create_success &= buffers_["array3"].init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
+      VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY);
+  create_success &= buffers_["num"].init(vk_info_, sizeof(int), 1, vk::BufferUsageFlagBits::eUniformBuffer,
+      VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
+  create_success &= buffers_["sum"].init(vk_info_, sizeof(float), 1, vk::BufferUsageFlagBits::eStorageBuffer,
+      VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_TO_CPU);
+  return create_success;
+}
 
-  return true;
+bool Benchmark::CreateDescriptors() {
+  bool create_success = true;
+  create_success &= desc_sets_["sum_two_array"].init(vk_info_, {&buffers_["array1"], &buffers_["array2"],
+      &buffers_["array3"], &buffers_["num"]});
+  create_success &= desc_sets_["array_reduction"].init(vk_info_, {&buffers_["array3"], &buffers_["sum"],
+       &buffers_["num"]});
+  return create_success;
+}
+
+bool Benchmark::CreatePipelines() {
+  bool create_success = true;
+  for (string name : {"sum_two_array", "array_reduction"})
+    create_success &= pipelines_[name].init(vk_info_, desc_sets_[name], shader::comp_spv[name]);
+  return create_success;
 }
