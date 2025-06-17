@@ -1,3 +1,4 @@
+#define VMA_IMPLEMENTATION 1
 #include "benchmark.h"
 #include <iostream>
 #include "shaders.hpp"
@@ -6,7 +7,7 @@
 { \
   auto res = vk::Result(call); \
   if (vk::Result::eSuccess != res) { \
-    printf("[Error] vulkan call failed in %s:%d, result is %s\n",__FILE__,__LINE__, vk::to_string(res)); \
+    printf("[Error] vulkan call failed in %s:%d, result is %s\n",__FILE__,__LINE__, vk::to_string(res).c_str()); \
     return false; \
   } \
 } \

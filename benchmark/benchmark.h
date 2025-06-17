@@ -1,7 +1,10 @@
+#pragma once
 #include <vulkan/vulkan.hpp>
 #include <vector>
 #include <string>
 #include <unordered_map>
+
+
 #include "vk_mem_alloc.h" // Vulkan Memory Allocator library
 
 struct VkInfo {
