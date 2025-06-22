@@ -6,6 +6,8 @@
 #include "vk_mem_alloc.h" // Vulkan Memory Allocator library
 
 struct VkInfo {
+  void Destroy();
+  // ~VkInfo() { Destroy(); }
   vk::Instance instance;
   vk::PhysicalDevice phy_device;
   vk::Device device;
@@ -19,6 +21,7 @@ struct VkInfo {
 struct Buffer {
   bool Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUsageFlags buff_usage,
     VmaMemoryUsage alloc_usage);
+  void Destroy();
   /** 设置数据 */
   template<typename T>
   bool SetData(T *data, size_t num);  // TODO: 只有CPU VISIABLE的才能set和get
@@ -27,7 +30,7 @@ struct Buffer {
   /** 获取数据 */
   template<typename T>
   bool GetData(T *data, size_t num);
-  ~Buffer();
+  ~Buffer(){ Destroy(); }
 
   vk::Buffer buffer;
   VmaAllocation allocation; // Vulkan Memory Allocator allocation
@@ -41,7 +44,8 @@ struct Buffer {
 
 struct DescriptorSet {
   bool Init(const VkInfo &info, const std::vector<Buffer*> &buffers);
-  ~DescriptorSet();
+  void Destroy();
+  ~DescriptorSet() { Destroy(); }
   vk::DescriptorSet set;
   vk::DescriptorSetLayout layout;
   vk::Device device;
@@ -49,6 +53,8 @@ struct DescriptorSet {
 
 struct Pipeline {
   bool Init(const VkInfo &info, const DescriptorSet &desc, const std::vector<uint32_t> &shader_code);
+  void Destroy();
+  ~Pipeline() { Destroy(); }
   vk::Pipeline pipeline;
   vk::PipelineLayout layout;
   vk::PipelineCache cache;  // TODO: 有必要吗
@@ -66,7 +72,7 @@ public:
   Benchmark(int elem_num);
   ~Benchmark();
 
-  bool CreateSuccrss() const {return create_succrss_;};
+  bool CreateSuccess() const {return create_succrss_;};
   bool run();
 
 private:
@@ -75,7 +81,7 @@ private:
   bool CreateDescriptors();
   bool CreatePipelines();
   bool AllocateCommandBuffer();
-
+  bool CreateFence();
 
   VkInfo vk_info_;
   std::unordered_map<std::string, Buffer> buffers_;

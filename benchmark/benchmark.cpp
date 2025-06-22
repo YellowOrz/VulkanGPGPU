@@ -11,12 +11,20 @@
     printf("[Error] vulkan call failed in %s:%d, result is %s\n",__FILE__,__LINE__, vk::to_string(res).c_str()); \
     return false; \
   } \
-} \
+}
 
 using namespace std;
 
+void VkInfo::Destroy() {
+  device.destroyCommandPool(cmd_pool);
+  device.destroyDescriptorPool(desc_pool);
+  vmaDestroyAllocator(allocator);
+  device.destroy();
+  instance.destroy();
+}
+
 bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUsageFlags buff_usage,
-    VmaMemoryUsage alloc_usage) {
+                  VmaMemoryUsage alloc_usage) {
   one_elem_size = elem_size;
   num_elems = num;
   size = one_elem_size * num_elems;
@@ -41,9 +49,10 @@ bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUs
   return true;
 }
 
-Buffer::~Buffer() {
+void Buffer::Destroy() {
   vmaDestroyBuffer(allocator, buffer, allocation);
 }
+
 
 template<typename T>
 bool Buffer::SetData(T *data, size_t num) {
@@ -135,9 +144,11 @@ bool DescriptorSet::Init(const VkInfo &info, const std::vector<Buffer*> &buffers
   device.updateDescriptorSets(write_set, nullptr);  // TODO: 需要descriptor copy嘛？
   return true;
 }
-DescriptorSet::~DescriptorSet() {
+
+void DescriptorSet::Destroy() {
   device.destroyDescriptorSetLayout(layout);
 }
+
 
 bool Pipeline::Init(const VkInfo &info, const DescriptorSet &desc, const vector<uint32_t> &shader_code) {
   device = info.device;
@@ -167,6 +178,12 @@ bool Pipeline::Init(const VkInfo &info, const DescriptorSet &desc, const vector<
   return true;
 }
 
+void Pipeline::Destroy() {
+  device.destroyPipeline(pipeline);
+  device.destroyPipelineLayout(layout);
+  device.destroyPipelineCache(cache);
+  device.destroyShaderModule(shader_module);
+}
 // bool Barrier::Init() {
 //   barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
 //   barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
@@ -180,26 +197,37 @@ Benchmark::Benchmark(int elem_num): elem_num_(elem_num) {
     return;
   }
   //! 创建buffer、descriptor、pipeline
-  if (CreateBuffers()) {
+  if (!CreateBuffers()) {
     printf("[FATAL] Failed to create buffers.\n");
     return;
   }
-  if (CreateDescriptors()) {
+  if (!CreateDescriptors()) {
     printf("[FATAL] Failed to create descriptors.\n");
     return;
   }
-  if (CreatePipelines()) {
+  if (!CreatePipelines()) {
     printf("[FATAL] Failed to create pipelines.\n");
     return;
   }
-  if (AllocateCommandBuffer()) {
+  if (!AllocateCommandBuffer()) {
     printf("[FATAL] Failed to allocate command buffer.\n");
+    return;
+  }
+  if (!CreateFence()) {
+    printf("[FATAL] Failed to create fence.\n");
     return;
   }
   create_succrss_ = true;
 }
 Benchmark::~Benchmark() {
-    // 清理
+  // 清理
+  if (create_succrss_) {
+    vk_info_.device.destroyFence(fence_);
+    buffers_.clear();
+    desc_sets_.clear();
+    pipelines_.clear();
+    vk_info_.Destroy();
+  }
 }
 
 bool Benchmark::run() {
@@ -229,7 +257,7 @@ bool Benchmark::run() {
     vk::DependencyFlagBits::eByRegion, 1, &barrier, 0, nullptr, 0, nullptr);
   cmd_buffer_.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines_["array_reduction"].pipeline);
   cmd_buffer_.dispatch(128, 1 ,1);
-
+  cmd_buffer_.end();
   vk::SubmitInfo submit_info;
   submit_info.setCommandBufferCount(1).setPCommandBuffers(&cmd_buffer_);
   VK_CHECK(vk_info_.queue.submit(1, &submit_info, fence_));
@@ -249,6 +277,27 @@ bool Benchmark::run() {
   return true;
 }
 
+/**
+ * @brief 检查物理设备是否支持所需的所有扩展
+ * @param[in] physical_device 物理设备
+ * @param[in] extension_names 需要支持的扩展名称
+ * @return 第一个不支持的扩展id，<0表示都支持
+ */
+int check_device_extension(const vk::PhysicalDevice &physical_device, const vector<const char *> &extension_names) {
+  auto available_extensions = physical_device.enumerateDeviceExtensionProperties();
+  for (int i = 0; i < extension_names.size(); i++) {
+    auto &name = extension_names[i];
+    bool has_ext = false;
+    for (auto &ext: available_extensions)
+      if (strcmp(ext.extensionName, name) == 0) {
+        has_ext = true;
+        break;
+      }
+    if (!has_ext) return i;
+  }
+  return -1;
+}
+
 bool Benchmark::InitVkInfo() {
   auto &instance = vk_info_.instance;
   auto api_version = VK_API_VERSION_1_3;
@@ -264,23 +313,31 @@ bool Benchmark::InitVkInfo() {
   }
 
   auto &phy_device = vk_info_.phy_device;
+  const vector<const char *> extension_names = {"VK_EXT_shader_atomic_float", "VK_KHR_shader_non_semantic_info"};
   {//! 初始化physical device
     vector<vk::PhysicalDevice> phy_devices = instance.enumeratePhysicalDevices();
     if (phy_devices.empty()) {
       cout << "[FATAL] No physical device found!" << endl;
       return false;
     }
-    for(const auto &device : phy_devices) {
+    for(int i = 0; i<phy_devices.size(); i++) {
+      const auto &device = phy_devices[i];
       vk::PhysicalDeviceProperties prop = device.getProperties();
-      cout << "[INFO] found physical device name: " << prop.deviceName
-            << ", type: " << vk::to_string(prop.deviceType) << endl;
+      cout << "[INFO] Found " << i << "th physical device name: " << prop.deviceName
+            << ", type: " << vk::to_string(prop.deviceType) << ", ";
+      int not_support_id = check_device_extension(device, extension_names);
+      if (not_support_id >= 0) {
+        cout << "not support extension: " << extension_names[not_support_id] << endl;
+        return false;
+      };
+      cout << endl;
     }
 
     int device_id = 0;
     cout << "Please input the device id you want to use: ";
     cin >> device_id;
     if(device_id > phy_devices.size() - 1 || device_id < 0) {
-      cout << "[ERROR] invalid device id, use the first device by default" << endl;
+      cout << "[ERROR] invalid device id " << device_id << ", use the first device by default" << endl;
       device_id = 0;
     }
     phy_device = phy_devices[device_id];
@@ -305,8 +362,10 @@ bool Benchmark::InitVkInfo() {
 
     float priority = 1.0f;
     vk::DeviceQueueCreateInfo queue_info({}, queue_idx, 1, &priority);
-    const vector<const char *> extension_names = {"VK_EXT_shader_atomic_float", "VK_KHR_shader_non_semantic_info"};
-    vk::DeviceCreateInfo create_info({}, 1, &queue_info, 0, nullptr, extension_names.size(), extension_names.data());
+    vk::DeviceCreateInfo create_info;
+    create_info.setQueueCreateInfos({queue_info});
+    create_info.setPEnabledLayerNames({});
+    create_info.setPEnabledExtensionNames(extension_names);
     VK_CHECK(phy_device.createDevice(&create_info, nullptr, &device));
   }
   { //! 初始化command pool
@@ -376,5 +435,11 @@ bool Benchmark::AllocateCommandBuffer() {
   info.setLevel(vk::CommandBufferLevel::ePrimary);
   info.setCommandBufferCount(1);
   VK_CHECK(vk_info_.device.allocateCommandBuffers(&info, &cmd_buffer_));
+  return true;
+}
+
+bool Benchmark::CreateFence() {
+  vk::FenceCreateInfo info;
+  VK_CHECK(vk_info_.device.createFence(&info, nullptr, &fence_));
   return true;
 }
