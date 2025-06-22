@@ -2,6 +2,7 @@
 #include "benchmark.h"
 #include <iostream>
 #include "shaders.hpp"
+#include <random>
 
 # define VK_CHECK(call) \
 { \
@@ -14,7 +15,7 @@
 
 using namespace std;
 
-bool Buffer::init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUsageFlags buff_usage,
+bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUsageFlags buff_usage,
     VmaMemoryUsage alloc_usage) {
   one_elem_size = elem_size;
   num_elems = num;
@@ -34,14 +35,65 @@ bool Buffer::init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUs
   // alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
   // alloc_info.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-  VkBuffer buff_tmp = buffer;
+  VkBuffer buff_tmp;
   VK_CHECK(vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &buff_tmp, &allocation, nullptr));
+  buffer = buff_tmp;
   return true;
 }
 
 Buffer::~Buffer() {
   vmaDestroyBuffer(allocator, buffer, allocation);
 }
+
+template<typename T>
+bool Buffer::SetData(T *data, size_t num) {
+  if (num != num_elems) {
+    printf("[FATAL] set data failed, because src.size() != num_elems\n");
+    return false;
+  }
+  if (sizeof(T) != one_elem_size) {
+    printf("[FATAL] set data failed, because sizeof(T) != one_elem_size\n");
+    return false;
+  }
+  void *map_data;
+  VK_CHECK(vmaMapMemory(allocator, allocation, &map_data));
+  memcpy(map_data, data, size);
+  VK_CHECK(vmaFlushAllocation(allocator, allocation, 0, size)); // TODO: 失败了需要unmap嘛
+  vmaUnmapMemory(allocator, allocation);
+  return true;
+}
+
+bool Buffer::SetZero() {
+  void *map_data;
+  VK_CHECK(vmaMapMemory(allocator, allocation, &map_data));
+  memset(map_data, 0, size);
+  VK_CHECK(vmaFlushAllocation(allocator, allocation, 0, size));
+  vmaUnmapMemory(allocator, allocation);
+  return true;
+}
+
+template<typename T>
+bool Buffer::GetData(T *data, size_t num) {
+  if (num != num_elems) {
+    printf("[FATAL] get data failed, because src.size() != num_elems\n");
+    return false;
+  }
+  if (sizeof(T) != one_elem_size) {
+    printf("[FATAL] get data failed, because sizeof(T) != one_elem_size\n");
+    return false;
+  }
+  void *map_data;
+  VK_CHECK(vmaMapMemory(allocator, allocation, &map_data));
+  VK_CHECK(vmaInvalidateAllocation(allocator, allocation, 0, size));  // TODO: 失败了需要unmap嘛
+  memcpy(data, map_data, size);
+  vmaUnmapMemory(allocator, allocation);
+  return true;
+}
+
+// NOTE: 特例化
+template bool Buffer::SetData(float *data, size_t num);
+template bool Buffer::SetData(int *data, size_t num);
+template bool Buffer::GetData(float *data, size_t num);
 
 vk::DescriptorType ConvertVkBufferUsage2DescriptorType(vk::BufferUsageFlags usage) {
   if (usage & vk::BufferUsageFlagBits::eStorageBuffer)
@@ -51,7 +103,7 @@ vk::DescriptorType ConvertVkBufferUsage2DescriptorType(vk::BufferUsageFlags usag
   return vk::DescriptorType::eSampler;  // 默认值
 }
 
-bool DescriptorSet::init(const VkInfo &info, const std::vector<Buffer*> &buffers) {
+bool DescriptorSet::Init(const VkInfo &info, const std::vector<Buffer*> &buffers) {
   device = info.device;
   //! 创建descriptor set layout
   auto num = buffers.size();
@@ -87,7 +139,7 @@ DescriptorSet::~DescriptorSet() {
   device.destroyDescriptorSetLayout(layout);
 }
 
-bool Pipeline::init(const VkInfo &info, const DescriptorSet &desc, const vector<uint32_t> &shader_code) {
+bool Pipeline::Init(const VkInfo &info, const DescriptorSet &desc, const vector<uint32_t> &shader_code) {
   device = info.device;
   vk::PipelineLayoutCreateInfo layout_info;
   layout_info.setSetLayouts({desc.layout});
@@ -115,13 +167,20 @@ bool Pipeline::init(const VkInfo &info, const DescriptorSet &desc, const vector<
   return true;
 }
 
-Benchmark::Benchmark(int elem_num) {
+// bool Barrier::Init() {
+//   barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+//   barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+// }
+
+Benchmark::Benchmark(int elem_num): elem_num_(elem_num) {
   create_succrss_ = false;
+  //! 初始化 Vulkan 环境
   if (!InitVkInfo()) {
     printf("[FATAL] Failed to initialize Vulkan instance.\n");
     return;
   }
-  if (CreateBuffers(elem_num)) {
+  //! 创建buffer、descriptor、pipeline
+  if (CreateBuffers()) {
     printf("[FATAL] Failed to create buffers.\n");
     return;
   }
@@ -133,13 +192,63 @@ Benchmark::Benchmark(int elem_num) {
     printf("[FATAL] Failed to create pipelines.\n");
     return;
   }
+  if (AllocateCommandBuffer()) {
+    printf("[FATAL] Failed to allocate command buffer.\n");
+    return;
+  }
   create_succrss_ = true;
 }
 Benchmark::~Benchmark() {
     // 清理
 }
-void Benchmark::run() {
+
+bool Benchmark::run() {
+  //! 初始化数据
+  vector<float> data(elem_num_);
+  for (auto &d: data)
+    d = float(rand()) / RAND_MAX;
+  bool set_success = true;
+  set_success &= buffers_["array1"].SetData(data.data(), elem_num_);
+  set_success &= buffers_["array2"].SetData(data.data(), elem_num_);
+  set_success &= buffers_["num"].SetData<int>(&elem_num_, 1);
+  set_success &= buffers_["sum"].SetZero();
+  if (!set_success) {
+    printf("[FATAL] Failed to set data.\n");
+    return false;
+  }
+  //! 执行GPU计算
+  vk::CommandBufferBeginInfo begin_info;
+  begin_info.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+  cmd_buffer_.begin(begin_info);
+  cmd_buffer_.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines_["array_reduction"].pipeline);
+  cmd_buffer_.dispatch(128, 1 ,1);
+  vk::MemoryBarrier barrier;  // NOTE: 不能用execution barrier，因为上个shader的数据可能仅在GPU缓存中
+  barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+  barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+  cmd_buffer_.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
+    vk::DependencyFlagBits::eByRegion, 1, &barrier, 0, nullptr, 0, nullptr);
+  cmd_buffer_.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines_["array_reduction"].pipeline);
+  cmd_buffer_.dispatch(128, 1 ,1);
+
+  vk::SubmitInfo submit_info;
+  submit_info.setCommandBufferCount(1).setPCommandBuffers(&cmd_buffer_);
+  VK_CHECK(vk_info_.queue.submit(1, &submit_info, fence_));
+  //! 输出GPU计算结果
+  VK_CHECK(vk_info_.device.waitForFences(1, &fence_, VK_TRUE, UINT64_MAX));
+  float sum;
+  if (!buffers_["sum"].GetData(&sum, 1)) {
+    printf("[FATAL] Failed to get data from GPU\n");
+    return false;
+  }
+  printf("[INFO] Sum of array in GPU is %f\n", sum);
+  //! CPU计算结果
+  sum = 0.f;
+  for (auto &d: data)
+    sum += d;
+  printf("[INFO] Sum of arrat in CPU is %f\n", sum);
+  return true;
 }
+
 bool Benchmark::InitVkInfo() {
   auto &instance = vk_info_.instance;
   auto api_version = VK_API_VERSION_1_3;
@@ -197,12 +306,15 @@ bool Benchmark::InitVkInfo() {
     float priority = 1.0f;
     vk::DeviceQueueCreateInfo queue_info({}, queue_idx, 1, &priority);
     const vector<const char *> extension_names = {"VK_EXT_shader_atomic_float", "VK_KHR_shader_non_semantic_info"};
-    vk::DeviceCreateInfo create_info({}, 1, &queue_info, 0, nullptr, 0, nullptr);
+    vk::DeviceCreateInfo create_info({}, 1, &queue_info, 0, nullptr, extension_names.size(), extension_names.data());
     VK_CHECK(phy_device.createDevice(&create_info, nullptr, &device));
   }
   { //! 初始化command pool
     vk::CommandPoolCreateInfo create_info({}, queue_idx);
     VK_CHECK(device.createCommandPool(&create_info, nullptr, &vk_info_.cmd_pool));
+  }
+  { //! 获取queue
+    vk_info_.queue = device.getQueue(queue_idx, 0);
   }
   { //! 初始化descriptor pool
     vector<vk::DescriptorPoolSize> pool_sizes = {
@@ -227,27 +339,26 @@ bool Benchmark::InitVkInfo() {
   return true;
 }
 
-bool Benchmark::CreateBuffers(int elem_num) {
-  elem_num_ = elem_num;
+bool Benchmark::CreateBuffers() {
   bool create_success = true;
-  create_success &= buffers_["array1"].init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
+  create_success &= buffers_["array1"].Init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
       VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
-  create_success &= buffers_["array2"].init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
+  create_success &= buffers_["array2"].Init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
       VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
-  create_success &= buffers_["array3"].init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
+  create_success &= buffers_["array3"].Init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
       VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY);
-  create_success &= buffers_["num"].init(vk_info_, sizeof(int), 1, vk::BufferUsageFlagBits::eUniformBuffer,
+  create_success &= buffers_["num"].Init(vk_info_, sizeof(int), 1, vk::BufferUsageFlagBits::eUniformBuffer,
       VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
-  create_success &= buffers_["sum"].init(vk_info_, sizeof(float), 1, vk::BufferUsageFlagBits::eStorageBuffer,
+  create_success &= buffers_["sum"].Init(vk_info_, sizeof(float), 1, vk::BufferUsageFlagBits::eStorageBuffer,
       VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_TO_CPU);
   return create_success;
 }
 
 bool Benchmark::CreateDescriptors() {
   bool create_success = true;
-  create_success &= desc_sets_["sum_two_array"].init(vk_info_, {&buffers_["array1"], &buffers_["array2"],
+  create_success &= desc_sets_["sum_two_array"].Init(vk_info_, {&buffers_["array1"], &buffers_["array2"],
       &buffers_["array3"], &buffers_["num"]});
-  create_success &= desc_sets_["array_reduction"].init(vk_info_, {&buffers_["array3"], &buffers_["sum"],
+  create_success &= desc_sets_["array_reduction"].Init(vk_info_, {&buffers_["array3"], &buffers_["sum"],
        &buffers_["num"]});
   return create_success;
 }
@@ -255,6 +366,15 @@ bool Benchmark::CreateDescriptors() {
 bool Benchmark::CreatePipelines() {
   bool create_success = true;
   for (string name : {"sum_two_array", "array_reduction"})
-    create_success &= pipelines_[name].init(vk_info_, desc_sets_[name], shader::comp_spv[name]);
+    create_success &= pipelines_[name].Init(vk_info_, desc_sets_[name], shader::comp_spv[name]);
   return create_success;
+}
+
+bool Benchmark::AllocateCommandBuffer() {
+  vk::CommandBufferAllocateInfo info;
+  info.setCommandPool(vk_info_.cmd_pool);
+  info.setLevel(vk::CommandBufferLevel::ePrimary);
+  info.setCommandBufferCount(1);
+  VK_CHECK(vk_info_.device.allocateCommandBuffers(&info, &cmd_buffer_));
+  return true;
 }
