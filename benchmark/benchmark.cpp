@@ -24,7 +24,7 @@ void VkInfo::Destroy() {
 }
 
 bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUsageFlags buff_usage,
-                  VmaMemoryUsage alloc_usage) {
+                  Usage alloc_usage) {
   one_elem_size = elem_size;
   num_elems = num;
   size = one_elem_size * num_elems;
@@ -38,10 +38,9 @@ bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUs
   buffer_info.pQueueFamilyIndices = &info.queue_idx;
 
   VmaAllocationCreateInfo alloc_info;
-  alloc_info.usage = alloc_usage;
-  // alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
-  // alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
-  // alloc_info.requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  // alloc_info.usage = alloc_usage;
+  alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+  alloc_info.requiredFlags = alloc_usage;
 
   VkBuffer buff_tmp;
   VK_CHECK(vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &buff_tmp, &allocation, nullptr));
@@ -401,15 +400,15 @@ bool Benchmark::InitVkInfo() {
 bool Benchmark::CreateBuffers() {
   bool create_success = true;
   create_success &= buffers_["array1"].Init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
-      VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
+      Buffer::kCPU_TO_GPU);
   create_success &= buffers_["array2"].Init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
-      VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
+      Buffer::kCPU_TO_GPU);
   create_success &= buffers_["array3"].Init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
-      VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY);
+      Buffer::kGPU_ONLY);
   create_success &= buffers_["num"].Init(vk_info_, sizeof(int), 1, vk::BufferUsageFlagBits::eUniformBuffer,
-      VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
+      Buffer::kCPU_TO_GPU);
   create_success &= buffers_["sum"].Init(vk_info_, sizeof(float), 1, vk::BufferUsageFlagBits::eStorageBuffer,
-      VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_TO_CPU);
+      Buffer::kGPU_TO_CPU);
   return create_success;
 }
 

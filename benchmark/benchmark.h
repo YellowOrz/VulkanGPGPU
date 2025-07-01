@@ -19,8 +19,15 @@ struct VkInfo {
 };
 
 struct Buffer {
+  enum Usage {  // NOTE: https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#gaa5846affa1e9da3800e3e78fae2305cc
+    kGPU_ONLY = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    kCPU_ONLY = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+    kCPU_TO_GPU = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+    kGPU_TO_CPU = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+    kCPU_COPY = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+  };
   bool Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUsageFlags buff_usage,
-    VmaMemoryUsage alloc_usage);
+    Usage alloc_usage);
   void Destroy();
   /** 设置数据 */
   template<typename T>
