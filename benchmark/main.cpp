@@ -5,7 +5,7 @@ using namespace std;
 int main() {
   int elem_num = 1<<24;
   Benchmark benchmark(elem_num);
-  if (!benchmark.CreateSuccrss()) {
+  if (!benchmark.CreateSuccess()) {
     printf("[FATAL] Create Benchmark Failed!\n");
     return -1;
   }

@@ -16,9 +16,11 @@
 using namespace std;
 
 void VkInfo::Destroy() {
+#ifdef USE_VMA
+  vmaDestroyAllocator(allocator);
+#endif
   device.destroyCommandPool(cmd_pool);
   device.destroyDescriptorPool(desc_pool);
-  vmaDestroyAllocator(allocator);
   device.destroy();
   instance.destroy();
 }
@@ -28,7 +30,6 @@ bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUs
   one_elem_size = elem_size;
   num_elems = num;
   size = one_elem_size * num_elems;
-  allocator = info.allocator;
 
   VkBufferCreateInfo buffer_info;
   buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -36,7 +37,8 @@ bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUs
   buffer_info.usage = static_cast<VkBufferUsageFlags>(buff_usage);
   buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   buffer_info.pQueueFamilyIndices = &info.queue_idx;
-
+#ifdef USE_VMA
+  allocator = info.allocator;
   VmaAllocationCreateInfo alloc_info;
   // alloc_info.usage = alloc_usage;
   alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
@@ -45,11 +47,36 @@ bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUs
   VkBuffer buff_tmp;
   VK_CHECK(vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &buff_tmp, &allocation, nullptr));
   buffer = buff_tmp;
+#else
+  // vk::MemoryRequirements mem_req = info.device.getBufferMemoryRequirements(buffer);
+  device = info.device;
+  vk::MemoryAllocateInfo alloc_info;
+  alloc_info.allocationSize = size;
+  alloc_info.memoryTypeIndex = UINT32_MAX;
+  auto &phy_mem_pros = info.mem_props;
+  for (uint32_t i =0;i<phy_mem_pros.memoryTypeCount; i++) {
+    auto flag = static_cast<VkMemoryPropertyFlags>(phy_mem_pros.memoryTypes[i].propertyFlags);  // TODO: 怎么写得更优雅
+    if (flag & alloc_usage) {
+      alloc_info.memoryTypeIndex = i;
+      break;
+    }
+  }
+  if (alloc_info.memoryTypeIndex == UINT32_MAX) {
+    printf("[FATAL] no property physical memory to crete Buffer\n");
+    return false;
+  }
+  VK_CHECK(device.allocateMemory(&alloc_info, nullptr, &mem));
+#endif
   return true;
 }
 
 void Buffer::Destroy() {
+#ifdef USE_VMA
   vmaDestroyBuffer(allocator, buffer, allocation);
+#else
+  device.freeMemory(mem);
+  device.destroyBuffer(buffer);
+#endif
 }
 
 
@@ -64,19 +91,31 @@ bool Buffer::SetData(T *data, size_t num) {
     return false;
   }
   void *map_data;
+#ifdef USE_VMA
   VK_CHECK(vmaMapMemory(allocator, allocation, &map_data));
   memcpy(map_data, data, size);
-  VK_CHECK(vmaFlushAllocation(allocator, allocation, 0, size)); // TODO: 失败了需要unmap嘛
+  VK_CHECK(vmaFlushAllocation(allocator, allocation, 0, size)); // TODO: 失败了需要unmap嘛？如果是coherent的就不要这个了吗？
   vmaUnmapMemory(allocator, allocation);
+#else
+  VK_CHECK(device.mapMemory(mem, 0, size, vk::MemoryMapFlagBits::ePlacedEXT, &map_data));
+  memcpy(map_data, data, size);
+  device.unmapMemory(mem);
+#endif
   return true;
 }
 
 bool Buffer::SetZero() {
   void *map_data;
+#ifdef USE_VMA
   VK_CHECK(vmaMapMemory(allocator, allocation, &map_data));
   memset(map_data, 0, size);
   VK_CHECK(vmaFlushAllocation(allocator, allocation, 0, size));
   vmaUnmapMemory(allocator, allocation);
+#else
+  VK_CHECK(device.mapMemory(mem, 0, size, vk::MemoryMapFlagBits::ePlacedEXT, &map_data));
+  memset(map_data, 0, size);
+  device.unmapMemory(mem);
+#endif
   return true;
 }
 
@@ -91,10 +130,16 @@ bool Buffer::GetData(T *data, size_t num) {
     return false;
   }
   void *map_data;
+#ifdef USE_VMA
   VK_CHECK(vmaMapMemory(allocator, allocation, &map_data));
   VK_CHECK(vmaInvalidateAllocation(allocator, allocation, 0, size));  // TODO: 失败了需要unmap嘛
   memcpy(data, map_data, size);
   vmaUnmapMemory(allocator, allocation);
+#else
+  VK_CHECK(device.mapMemory(mem, 0, size, vk::MemoryMapFlagBits::ePlacedEXT, &map_data));
+  memcpy(data, map_data, size);
+  device.unmapMemory(mem);
+#endif
   return true;
 }
 
@@ -385,7 +430,7 @@ bool Benchmark::InitVkInfo() {
     create_info.setFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet);
     VK_CHECK(device.createDescriptorPool(&create_info, nullptr, &vk_info_.desc_pool));
   }
-
+#ifdef USE_VMA
   { //! 初始化VmaAllocator
     VmaAllocatorCreateInfo create_info = {};
     create_info.vulkanApiVersion = api_version;
@@ -394,6 +439,9 @@ bool Benchmark::InitVkInfo() {
     create_info.instance = instance;
     VK_CHECK(vmaCreateAllocator(&create_info, &vk_info_.allocator));
   }
+#else
+  vk_info_.mem_props = phy_device.getMemoryProperties();
+#endif
   return true;
 }
 

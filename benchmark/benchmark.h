@@ -3,7 +3,9 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#ifdef USE_VMA
 #include "vk_mem_alloc.h" // Vulkan Memory Allocator library
+#endif
 
 struct VkInfo {
   void Destroy();
@@ -15,7 +17,11 @@ struct VkInfo {
   vk::Queue queue;
   vk::CommandPool cmd_pool;
   vk::DescriptorPool desc_pool;
+#ifdef USE_VMA
   VmaAllocator allocator;
+#else
+  vk::PhysicalDeviceMemoryProperties mem_props;
+#endif
 };
 
 struct Buffer {
@@ -23,8 +29,11 @@ struct Buffer {
     kGPU_ONLY = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
     kCPU_ONLY = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
     kCPU_TO_GPU = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-    kGPU_TO_CPU = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
-    kCPU_COPY = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    kGPU_TO_CPU = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT
+    // kGPU_ONLY = vk::MemoryPropertyFlagBits::eDeviceLocal,
+    // kCPU_ONLY = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+    // kCPU_TO_GPU = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eDeviceLocal,
+    // kGPU_TO_CPU = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached
   };
   bool Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUsageFlags buff_usage,
     Usage alloc_usage);
@@ -40,13 +49,18 @@ struct Buffer {
   ~Buffer(){ Destroy(); }
 
   vk::Buffer buffer;
-  VmaAllocation allocation; // Vulkan Memory Allocator allocation
-  VmaAllocator allocator; // Vulkan Memory Allocator instance
   size_t one_elem_size;
   size_t num_elems;
   size_t size;
   vk::BufferUsageFlags usage;
 
+#ifdef USE_VMA
+  VmaAllocation allocation; // Vulkan Memory Allocator allocation
+  VmaAllocator allocator; // Vulkan Memory Allocator instance
+#else
+  vk::Device device;
+  vk::DeviceMemory mem;
+#endif
 };
 
 struct DescriptorSet {
