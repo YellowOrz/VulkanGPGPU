@@ -30,13 +30,13 @@ bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUs
   one_elem_size = elem_size;
   num_elems = num;
   size = one_elem_size * num_elems;
+  usage = buff_usage;
 
-  VkBufferCreateInfo buffer_info;
-  buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  buffer_info.size = size;
-  buffer_info.usage = static_cast<VkBufferUsageFlags>(buff_usage);
-  buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-  buffer_info.pQueueFamilyIndices = &info.queue_idx;
+  vk::BufferCreateInfo buffer_info;
+  buffer_info.setSize(size);
+  buffer_info.setUsage(usage);
+  buffer_info.setSharingMode(vk::SharingMode::eExclusive);  // TODO: 是这个吗
+  buffer_info.setQueueFamilyIndices({info.queue_idx});
 #ifdef USE_VMA
   allocator = info.allocator;
   VmaAllocationCreateInfo alloc_info;
@@ -44,12 +44,12 @@ bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUs
   alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
   alloc_info.requiredFlags = alloc_usage;
 
-  VkBuffer buff_tmp;
-  VK_CHECK(vmaCreateBuffer(allocator, &buffer_info, &alloc_info, &buff_tmp, &allocation, nullptr));
-  buffer = buff_tmp;
+  VK_CHECK(vmaCreateBuffer(allocator, &static_cast<VkBufferCreateInfo>(buffer_info), &alloc_info,
+    &static_cast<VkBuffer>(buffer), &allocation, nullptr));
 #else
-  // vk::MemoryRequirements mem_req = info.device.getBufferMemoryRequirements(buffer);
   device = info.device;
+  VK_CHECK(device.createBuffer(&buffer_info, nullptr, &buffer));
+  // vk::MemoryRequirements mem_req = info.device.getBufferMemoryRequirements(buffer);
   vk::MemoryAllocateInfo alloc_info;
   alloc_info.allocationSize = size;
   alloc_info.memoryTypeIndex = UINT32_MAX;
@@ -66,6 +66,7 @@ bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUs
     return false;
   }
   VK_CHECK(device.allocateMemory(&alloc_info, nullptr, &mem));
+  device.bindBufferMemory(buffer, mem, 0);
 #endif
   return true;
 }
@@ -97,7 +98,7 @@ bool Buffer::SetData(T *data, size_t num) {
   VK_CHECK(vmaFlushAllocation(allocator, allocation, 0, size)); // TODO: 失败了需要unmap嘛？如果是coherent的就不要这个了吗？
   vmaUnmapMemory(allocator, allocation);
 #else
-  VK_CHECK(device.mapMemory(mem, 0, size, vk::MemoryMapFlagBits::ePlacedEXT, &map_data));
+  VK_CHECK(device.mapMemory(mem, 0, size, {}, &map_data));  // NOTE: 不能填写vk::MemoryMapFlagBits::ePlacedEXT
   memcpy(map_data, data, size);
   device.unmapMemory(mem);
 #endif
@@ -112,7 +113,7 @@ bool Buffer::SetZero() {
   VK_CHECK(vmaFlushAllocation(allocator, allocation, 0, size));
   vmaUnmapMemory(allocator, allocation);
 #else
-  VK_CHECK(device.mapMemory(mem, 0, size, vk::MemoryMapFlagBits::ePlacedEXT, &map_data));
+  VK_CHECK(device.mapMemory(mem, 0, size, {}, &map_data));
   memset(map_data, 0, size);
   device.unmapMemory(mem);
 #endif
@@ -136,7 +137,7 @@ bool Buffer::GetData(T *data, size_t num) {
   memcpy(data, map_data, size);
   vmaUnmapMemory(allocator, allocation);
 #else
-  VK_CHECK(device.mapMemory(mem, 0, size, vk::MemoryMapFlagBits::ePlacedEXT, &map_data));
+  VK_CHECK(device.mapMemory(mem, 0, size, {}, &map_data));
   memcpy(data, map_data, size);
   device.unmapMemory(mem);
 #endif
@@ -158,6 +159,13 @@ vk::DescriptorType ConvertVkBufferUsage2DescriptorType(vk::BufferUsageFlags usag
 
 bool DescriptorSet::Init(const VkInfo &info, const std::vector<Buffer*> &buffers) {
   device = info.device;
+  //! 检查输入buffer
+  for (auto &buf: buffers) {
+    if (!buf->buffer) {
+      printf("[ERROR] invalid buffer to init descriptor set\n");
+      return false;
+    }
+  }
   //! 创建descriptor set layout
   auto num = buffers.size();
   vector<vk::DescriptorSetLayoutBinding> bindings(num);
@@ -406,10 +414,19 @@ bool Benchmark::InitVkInfo() {
 
     float priority = 1.0f;
     vk::DeviceQueueCreateInfo queue_info({}, queue_idx, 1, &priority);
+
+    vk::PhysicalDeviceShaderAtomicFloatFeaturesEXT atomic_float_feat; // TODO: 这是啥？
+    // atomic_float_feat.shaderBufferFloat32Atomics = vk::True;
+    // atomic_float_feat.shaderSharedFloat32Atomics = vk::True;
+    atomic_float_feat.shaderBufferFloat32AtomicAdd = vk::True;
+    atomic_float_feat.shaderSharedFloat32AtomicAdd = vk::True;
+    // NOTE: PhysicalDeviceShaderAtomicFloat2FeaturesEXT里支持半精度和双进度的float以及max和min
+
     vk::DeviceCreateInfo create_info;
     create_info.setQueueCreateInfos({queue_info});
     create_info.setPEnabledLayerNames({});
     create_info.setPEnabledExtensionNames(extension_names);
+    create_info.setPNext(&atomic_float_feat);  // 链接到特性结构
     VK_CHECK(phy_device.createDevice(&create_info, nullptr, &device));
   }
   { //! 初始化command pool
