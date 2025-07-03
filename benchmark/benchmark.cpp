@@ -26,10 +26,10 @@ void VkInfo::Destroy() {
 }
 
 bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUsageFlags buff_usage,
-                  Usage alloc_usage) {
+                  int alloc_usage) {
   one_elem_size = elem_size;
   num_elems = num;
-  size = one_elem_size * num_elems;
+  size = one_elem_size * num_elems; // TODO: 获取对齐后的size
   usage = buff_usage;
 
   vk::BufferCreateInfo buffer_info;
@@ -49,14 +49,14 @@ bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUs
 #else
   device = info.device;
   VK_CHECK(device.createBuffer(&buffer_info, nullptr, &buffer));
-  // vk::MemoryRequirements mem_req = info.device.getBufferMemoryRequirements(buffer);
+  mem_req = info.device.getBufferMemoryRequirements(buffer);
   vk::MemoryAllocateInfo alloc_info;
-  alloc_info.allocationSize = size;
+  alloc_info.allocationSize = mem_req.size; // 不能用 size，因为有对齐的问题  // TODO: 看看mem_req.alignment是多少
   alloc_info.memoryTypeIndex = UINT32_MAX;
   auto &phy_mem_pros = info.mem_props;
   for (uint32_t i =0;i<phy_mem_pros.memoryTypeCount; i++) {
     auto flag = static_cast<VkMemoryPropertyFlags>(phy_mem_pros.memoryTypes[i].propertyFlags);  // TODO: 怎么写得更优雅
-    if (flag & alloc_usage) {
+    if ((flag & alloc_usage) == alloc_usage) {  // 找到同时满足alloc_usage所有要求的mem
       alloc_info.memoryTypeIndex = i;
       break;
     }
@@ -300,7 +300,9 @@ bool Benchmark::run() {
   vk::CommandBufferBeginInfo begin_info;
   begin_info.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
   cmd_buffer_.begin(begin_info);
-  cmd_buffer_.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines_["array_reduction"].pipeline);
+  cmd_buffer_.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines_["sum_two_array"].pipeline);
+  cmd_buffer_.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelines_["sum_two_array"].layout, 0,
+    {desc_sets_["sum_two_array"].set}, {});
   cmd_buffer_.dispatch(128, 1 ,1);
   vk::MemoryBarrier barrier;  // NOTE: 不能用execution barrier，因为上个shader的数据可能仅在GPU缓存中
   barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
@@ -308,6 +310,8 @@ bool Benchmark::run() {
   cmd_buffer_.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
     vk::DependencyFlagBits::eByRegion, 1, &barrier, 0, nullptr, 0, nullptr);
   cmd_buffer_.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines_["array_reduction"].pipeline);
+  cmd_buffer_.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelines_["array_reduction"].layout, 0,
+  {desc_sets_["array_reduction"].set}, {});
   cmd_buffer_.dispatch(128, 1 ,1);
   cmd_buffer_.end();
   vk::SubmitInfo submit_info;
@@ -386,7 +390,7 @@ bool Benchmark::InitVkInfo() {
     }
 
     int device_id = 0;
-    cout << "Please input the device id you want to use: ";
+    cout << "Please input the device id you want to use: " << endl;
     cin >> device_id;
     if(device_id > phy_devices.size() - 1 || device_id < 0) {
       cout << "[ERROR] invalid device id " << device_id << ", use the first device by default" << endl;
@@ -465,15 +469,15 @@ bool Benchmark::InitVkInfo() {
 bool Benchmark::CreateBuffers() {
   bool create_success = true;
   create_success &= buffers_["array1"].Init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
-      Buffer::kCPU_TO_GPU);
+      MEMORY_CPU_TO_GPU);
   create_success &= buffers_["array2"].Init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
-      Buffer::kCPU_TO_GPU);
+      MEMORY_CPU_TO_GPU);
   create_success &= buffers_["array3"].Init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
-      Buffer::kGPU_ONLY);
+      MEMORY_GPU_ONLY);
   create_success &= buffers_["num"].Init(vk_info_, sizeof(int), 1, vk::BufferUsageFlagBits::eUniformBuffer,
-      Buffer::kCPU_TO_GPU);
+      MEMORY_CPU_TO_GPU);
   create_success &= buffers_["sum"].Init(vk_info_, sizeof(float), 1, vk::BufferUsageFlagBits::eStorageBuffer,
-      Buffer::kGPU_TO_CPU);
+      MEMORY_GPU_TO_CPU);
   return create_success;
 }
 

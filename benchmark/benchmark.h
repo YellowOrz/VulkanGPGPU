@@ -7,6 +7,16 @@
 #include "vk_mem_alloc.h" // Vulkan Memory Allocator library
 #endif
 
+// NOTE: https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#gaa5846affa1e9da3800e3e78fae2305cc
+#define MEMORY_GPU_ONLY VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+#define MEMORY_CPU_ONLY VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+#define MEMORY_CPU_TO_GPU VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+#define MEMORY_GPU_TO_CPU VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT
+// #define MEMORY_GPU_ONLY vk::MemoryPropertyFlagBits::eDeviceLocal
+// #define MEMORY_CPU_ONLY vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent
+// #define MEMORY_CPU_TO_GPU vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eDeviceLocal
+// #define MEMORY_GPU_TO_CPU vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached
+
 struct VkInfo {
   void Destroy();
   // ~VkInfo() { Destroy(); }
@@ -25,18 +35,8 @@ struct VkInfo {
 };
 
 struct Buffer {
-  enum Usage {  // NOTE: https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#gaa5846affa1e9da3800e3e78fae2305cc
-    kGPU_ONLY = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-    kCPU_ONLY = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-    kCPU_TO_GPU = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-    kGPU_TO_CPU = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT
-    // kGPU_ONLY = vk::MemoryPropertyFlagBits::eDeviceLocal,
-    // kCPU_ONLY = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-    // kCPU_TO_GPU = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eDeviceLocal,
-    // kGPU_TO_CPU = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCached
-  };
   bool Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUsageFlags buff_usage,
-    Usage alloc_usage);
+    int alloc_usage);
   void Destroy();
   /** 设置数据 */
   template<typename T>
@@ -60,6 +60,7 @@ struct Buffer {
 #else
   vk::Device device;
   vk::DeviceMemory mem;
+  vk::MemoryRequirements mem_req; // 记录对齐后的内存大小
 #endif
 };
 
@@ -103,6 +104,7 @@ private:
   bool CreatePipelines();
   bool AllocateCommandBuffer();
   bool CreateFence();
+
 
   VkInfo vk_info_;
   std::unordered_map<std::string, Buffer> buffers_;
