@@ -284,9 +284,9 @@ Benchmark::~Benchmark() {
 
 bool Benchmark::Run() {
   //! 初始化数据
-  vector<float> data(elem_num_);
-  for (auto &d: data)
-    d = float(rand()) / RAND_MAX;
+  printf("[INFO] Num of element is %d\n", elem_num_);
+  float base_num = 1.f;
+  vector<float> data(elem_num_, base_num);
   bool set_success = true;
   set_success &= buffers_["array1"].SetData(data.data(), elem_num_);
   set_success &= buffers_["array2"].SetData(data.data(), elem_num_);
@@ -303,7 +303,7 @@ bool Benchmark::Run() {
   cmd_buffer_.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines_["sum_two_array"].pipeline);
   cmd_buffer_.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelines_["sum_two_array"].layout, 0,
     {desc_sets_["sum_two_array"].set}, {});
-  cmd_buffer_.dispatch(32, 1 ,1);
+  cmd_buffer_.dispatch(128, 1 ,1);  // 设置grid size  // NOTE: GLSL中设置的是block size
   vk::MemoryBarrier barrier;  // NOTE: 不能用execution barrier，因为上个shader的数据可能仅在GPU缓存中
   barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
   barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
@@ -311,8 +311,8 @@ bool Benchmark::Run() {
     vk::DependencyFlagBits::eByRegion, 1, &barrier, 0, nullptr, 0, nullptr);
   cmd_buffer_.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines_["array_reduction"].pipeline);
   cmd_buffer_.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelines_["array_reduction"].layout, 0,
-  {desc_sets_["array_reduction"].set}, {});
-  cmd_buffer_.dispatch(32, 1 ,1);
+    {desc_sets_["array_reduction"].set}, {});
+  cmd_buffer_.dispatch(128, 1 ,1);  // 设置grid size  // NOTE: GLSL中设置的是block size
   cmd_buffer_.end();
   vk::SubmitInfo submit_info;
   submit_info.setCommandBufferCount(1).setPCommandBuffers(&cmd_buffer_);
@@ -326,10 +326,8 @@ bool Benchmark::Run() {
   }
   printf("[INFO] Sum of array in GPU is %f\n", sum);
   //! CPU计算结果
-  sum = 0.f;
-  for (auto &d: data)
-    sum += d;
-  printf("[INFO] Sum of arrat in CPU is %f\n", sum);
+  sum = elem_num_ * 2 * base_num;
+  printf("[INFO] Sum of array in CPU is %f\n", sum);
   return true;
 }
 

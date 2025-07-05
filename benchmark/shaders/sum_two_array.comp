@@ -1,5 +1,5 @@
 #version 450
-layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
 layout(binding = 0) buffer buf_in1 {float in1[];};
 layout(binding = 1) buffer buf_in2 {float in2[];};
 layout(binding = 2) buffer buf_out {float res[];};
@@ -7,6 +7,7 @@ layout(binding = 3) uniform buf_count {int count;};
 
 void main () {
   uint id = gl_GlobalInvocationID.x;
-  if( id > count) return;
-  res[id] = in1[id] + in2[id];
+  uint stride = gl_WorkGroupSize.x * gl_NumWorkGroups.x;
+  for(uint i = id; i < count; i += stride)
+    res[i] = in1[i] + in2[i];
 }
