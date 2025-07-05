@@ -95,7 +95,7 @@ public:
   ~Benchmark();
 
   bool CreateSuccess() const {return create_succrss_;};
-  bool run();
+  bool Run();
 
 private:
   bool InitVkInfo();

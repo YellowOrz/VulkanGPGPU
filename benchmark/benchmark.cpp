@@ -282,7 +282,7 @@ Benchmark::~Benchmark() {
   }
 }
 
-bool Benchmark::run() {
+bool Benchmark::Run() {
   //! 初始化数据
   vector<float> data(elem_num_);
   for (auto &d: data)
@@ -303,7 +303,7 @@ bool Benchmark::run() {
   cmd_buffer_.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines_["sum_two_array"].pipeline);
   cmd_buffer_.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelines_["sum_two_array"].layout, 0,
     {desc_sets_["sum_two_array"].set}, {});
-  cmd_buffer_.dispatch(128, 1 ,1);
+  cmd_buffer_.dispatch(32, 1 ,1);
   vk::MemoryBarrier barrier;  // NOTE: 不能用execution barrier，因为上个shader的数据可能仅在GPU缓存中
   barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
   barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
@@ -312,7 +312,7 @@ bool Benchmark::run() {
   cmd_buffer_.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines_["array_reduction"].pipeline);
   cmd_buffer_.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelines_["array_reduction"].layout, 0,
   {desc_sets_["array_reduction"].set}, {});
-  cmd_buffer_.dispatch(128, 1 ,1);
+  cmd_buffer_.dispatch(32, 1 ,1);
   cmd_buffer_.end();
   vk::SubmitInfo submit_info;
   submit_info.setCommandBufferCount(1).setPCommandBuffers(&cmd_buffer_);
