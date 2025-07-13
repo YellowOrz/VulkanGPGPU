@@ -84,10 +84,17 @@ struct Pipeline {
   vk::Device device;
 };
 
-// struct Barrier {
-//   bool Init(const VkInfo &info);
-//   vk::MemoryBarrier barrier;
-// };
+struct float3 {
+  float3(float n): x(n), y(n), z(n) {}
+  float x,y,z;
+};
+
+struct Input {
+  Input(float n) :num1(n), vec(n), num2(n) {}
+  alignas(4) float num1;
+  alignas(16) float3 vec;
+  alignas(4) int num2;
+};
 
 class Benchmark {
 public:

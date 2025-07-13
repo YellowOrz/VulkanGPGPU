@@ -40,12 +40,12 @@ bool Buffer::Init(const VkInfo &info, size_t elem_size, size_t num, vk::BufferUs
 #ifdef USE_VMA
   allocator = info.allocator;
   VmaAllocationCreateInfo alloc_info;
-  // alloc_info.usage = alloc_usage;
   alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
   alloc_info.requiredFlags = alloc_usage;
 
-  VK_CHECK(vmaCreateBuffer(allocator, &static_cast<VkBufferCreateInfo>(buffer_info), &alloc_info,
-    &static_cast<VkBuffer>(buffer), &allocation, nullptr));
+  VkBuffer buf = buffer;
+  VK_CHECK(vmaCreateBuffer(allocator, buffer_info, &alloc_info, &buf, &allocation, nullptr));
+  // NOTE: vk::BufferCreateInfo提供了转成对应C结构体指针的成员函数operator T*()，但vk::Buffer没有。
 #else
   device = info.device;
   VK_CHECK(device.createBuffer(&buffer_info, nullptr, &buffer));
@@ -286,10 +286,9 @@ bool Benchmark::Run() {
   //! 初始化数据
   printf("[INFO] Num of element is %d\n", elem_num_);
   float base_num = 1.f;
-  vector<float> data(elem_num_, base_num);
+  vector<Input> data(elem_num_, Input(base_num));
   bool set_success = true;
-  set_success &= buffers_["array1"].SetData(data.data(), elem_num_);
-  set_success &= buffers_["array2"].SetData(data.data(), elem_num_);
+  set_success &= buffers_["inputs"].SetData(data.data(), elem_num_);
   set_success &= buffers_["num"].SetData<int>(&elem_num_, 1);
   set_success &= buffers_["sum"].SetZero();
   if (!set_success) {
@@ -300,9 +299,9 @@ bool Benchmark::Run() {
   vk::CommandBufferBeginInfo begin_info;
   begin_info.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
   cmd_buffer_.begin(begin_info);
-  cmd_buffer_.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines_["sum_two_array"].pipeline);
-  cmd_buffer_.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelines_["sum_two_array"].layout, 0,
-    {desc_sets_["sum_two_array"].set}, {});
+  cmd_buffer_.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines_["sum_inputs"].pipeline);
+  cmd_buffer_.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelines_["sum_inputs"].layout, 0,
+    {desc_sets_["sum_inputs"].set}, {});
   cmd_buffer_.dispatch(128, 1 ,1);  // 设置grid size  // NOTE: GLSL中设置的是block size
   vk::MemoryBarrier barrier;  // NOTE: 不能用execution barrier，因为上个shader的数据可能仅在GPU缓存中
   barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
@@ -326,7 +325,7 @@ bool Benchmark::Run() {
   }
   printf("[INFO] Sum of array in GPU is %f\n", sum);
   //! CPU计算结果
-  sum = elem_num_ * 2 * base_num;
+  sum = elem_num_ * 3 * base_num;
   printf("[INFO] Sum of array in CPU is %f\n", sum);
   return true;
 }
@@ -466,11 +465,9 @@ bool Benchmark::InitVkInfo() {
 
 bool Benchmark::CreateBuffers() {
   bool create_success = true;
-  create_success &= buffers_["array1"].Init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
+  create_success &= buffers_["inputs"].Init(vk_info_, sizeof(Input), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
       MEMORY_CPU_TO_GPU);
-  create_success &= buffers_["array2"].Init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
-      MEMORY_CPU_TO_GPU);
-  create_success &= buffers_["array3"].Init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
+  create_success &= buffers_["array"].Init(vk_info_, sizeof(float), elem_num_, vk::BufferUsageFlagBits::eStorageBuffer,
       MEMORY_GPU_ONLY);
   create_success &= buffers_["num"].Init(vk_info_, sizeof(int), 1, vk::BufferUsageFlagBits::eUniformBuffer,
       MEMORY_CPU_TO_GPU);
@@ -481,16 +478,16 @@ bool Benchmark::CreateBuffers() {
 
 bool Benchmark::CreateDescriptors() {
   bool create_success = true;
-  create_success &= desc_sets_["sum_two_array"].Init(vk_info_, {&buffers_["array1"], &buffers_["array2"],
-      &buffers_["array3"], &buffers_["num"]});
-  create_success &= desc_sets_["array_reduction"].Init(vk_info_, {&buffers_["array3"], &buffers_["sum"],
-       &buffers_["num"]});
+  create_success &= desc_sets_["sum_inputs"].Init(vk_info_, {&buffers_["inputs"], &buffers_["array"],
+    &buffers_["num"]});
+  create_success &= desc_sets_["array_reduction"].Init(vk_info_, {&buffers_["array"], &buffers_["sum"],
+    &buffers_["num"]});
   return create_success;
 }
 
 bool Benchmark::CreatePipelines() {
   bool create_success = true;
-  for (string name : {"sum_two_array", "array_reduction"})
+  for (string name : {"sum_inputs", "array_reduction"})
     create_success &= pipelines_[name].Init(vk_info_, desc_sets_[name], shader::comp_spv[name]);
   return create_success;
 }

@@ -23,6 +23,12 @@ add_custom_command(
 find_package(Vulkan REQUIRED)
 include_directories(${Vulkan_INCLUDE_DIRS})
 
+option(USE_VMA "if use vulkan memory allocation library" OFF)
+if (USE_VMA)
+    add_definitions(-DUSE_VMA)
+    include_directories(${CMAKE_SOURCE_DIR}/../thirdparty/vma)
+endif ()
+
 add_executable(${PROJECT_NAME} main.cpp benchmark.h benchmark.cpp)
 target_link_libraries(${PROJECT_NAME} PRIVATE ${Vulkan_LIBRARIES})
 add_dependencies(${PROJECT_NAME} compile_shaders)
